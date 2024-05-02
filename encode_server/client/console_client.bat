@@ -1,0 +1,1 @@
+python D:\Alex\YandexDisk\Projects\py\misc\edu\crpypt_files\client\console_client.py
