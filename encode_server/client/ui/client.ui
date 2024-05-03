@@ -134,7 +134,14 @@
          </widget>
         </item>
         <item row="5" column="1">
-         <widget class="QSpinBox" name="ThreadCountEdit"/>
+         <widget class="QSpinBox" name="PartCountEdit">
+          <property name="minimum">
+           <number>1</number>
+          </property>
+          <property name="value">
+           <number>5</number>
+          </property>
+         </widget>
         </item>
         <item row="4" column="1" colspan="4">
          <widget class="QLineEdit" name="OutFileEdit"/>
