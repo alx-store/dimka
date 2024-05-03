@@ -20,10 +20,12 @@ class CryptClientWindow(QMainWindow):
 
         self._adapter: ClientAdapter = None
         
-        uic.loadUi(module_dir / "ui/crypt_client.ui", self)
+        uic.loadUi(module_dir / "ui/client.ui", self)
         self.ConnectBtn.clicked.connect(self.connect)
         self.EncryptBtn.clicked.connect(self.encode)
         self.DecryptBtn.clicked.connect(self.decode)
+        self.InFileBtn.clicked.connect(self.get_input_file)
+        self.OutFileBtn.clicked.connect(self.get_output_file)
 
     
     def log_info(self, text: str) -> None:
@@ -32,13 +34,31 @@ class CryptClientWindow(QMainWindow):
     def log_error(self, text: str) -> None:
         self.LogEdit.append(f'<font color="#FF0000">{text}</font>')
 
+    def get_input_file(self) -> None:
+        file_name = self.select_file(True)
+        if file_name:
+            self.InFileEdit.setText(file_name)
+
+    def get_output_file(self) -> None:
+        file_name = self.select_file(False)
+        if file_name:
+            self.OutFileEdit.setText(file_name)
+
+    def select_file(self, is_input: bool = True) -> None:
+        file_dialog = QFileDialog(self) 
+        file_dialog.setAcceptMode(QFileDialog.AcceptOpen if is_input else QFileDialog.AcceptSave)
+        file_dialog.setFileMode(QFileDialog.ExistingFile if is_input else QFileDialog.AnyFile)
+        if is_input:
+            f = file_dialog.getOpenFileName()
+        else:
+            f = file_dialog.getSaveFileName()
+        return f[0]
+    
     def disconnect(self):
         if self._adapter:
            self.log_info("Закрытие соединения")
            self._adapter.close()
     
-    def enable_controls(self, enable: bool = True) -> None:
-        pass
     
     def encode(self) -> None:
         self.process_data("encode")
@@ -61,7 +81,7 @@ class CryptClientWindow(QMainWindow):
                 self.log_info(f"Запрос на кодирование ({command}), алгортим: {alg_name}, размер данных {len(data)}")
                 rsp = self._adapter.get(SocketRequest(command, {"alg_name": "first_alg"}, data))
                 rsp.check_status()
-                self.log_info(f"Сервер вернул даннйе, размер {len(rsp.payload)}")
+                self.log_info(f"Сервер вернул данные, размер {len(rsp.payload)}")
             except Exception as e:
                 self.log_error(f"Ошибка на сервере {str(e)}")
         else:
