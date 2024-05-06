@@ -51,12 +51,10 @@ class CryptClientWindow(QMainWindow):
         
         uic.loadUi(module_dir / "ui/client.ui", self)
         self.ConnectBtn.clicked.connect(self.connect)
-        self.EncryptBtn.clicked.connect(self.encode)
-        self.DecryptBtn.clicked.connect(self.decode)
-        self.InFileBtn.clicked.connect(self.get_input_file)
-        self.OutFileBtn.clicked.connect(self.get_output_file)
-        self.InFileEdit.editingFinished.connect(lambda : self.process_data("encode"))
-        self.OutFileEdit.editingFinished.connect(lambda : self.process_data("decode"))
+        self.EncryptBtn.clicked.connect(lambda : self.process_data("encode"))
+        self.DecryptBtn.clicked.connect(lambda : self.process_data("decode"))
+        self.InFileBtn.clicked.connect(lambda : self.select_file(is_input=True))
+        self.OutFileBtn.clicked.connect(lambda : self.select_file(is_input=False))
 
         self.info_lock: Lock = Lock()
         self.in_process: bool = False
@@ -76,8 +74,8 @@ class CryptClientWindow(QMainWindow):
         self.ConnectBtn.setEnabled(not self.in_process)
 
         files_selected = (self.InFileEdit.text() != "") and (self.OutFileEdit.text() != "") 
-        self.EncryptBtn.setEnabled(not self.in_process and files_selected and self._adapter)
-        self.DecryptBtn.setEnabled(not self.in_process and files_selected and self._adapter)
+        self.EncryptBtn.setEnabled(not self.in_process and files_selected and (self._adapter != None))
+        self.DecryptBtn.setEnabled(not self.in_process and files_selected and (self._adapter != None))
     
     def log_info(self, text: str, is_error: bool = False) -> None:
         self.info_lock.acquire()
@@ -88,27 +86,20 @@ class CryptClientWindow(QMainWindow):
         finally:
             self.info_lock.release()
 
-    def get_input_file(self) -> None:
-        file_name = self.select_file(True)
-        if file_name:
-            self.InFileEdit.setText(file_name)
-        self.enable_controls()
-
-    def get_output_file(self) -> None:
-        file_name = self.select_file(False)
-        if file_name:
-            self.OutFileEdit.setText(file_name)
-        self.enable_controls()
-
     def select_file(self, is_input: bool = True) -> None:
         file_dialog = QFileDialog(self) 
         file_dialog.setAcceptMode(QFileDialog.AcceptOpen if is_input else QFileDialog.AcceptSave)
         file_dialog.setFileMode(QFileDialog.ExistingFile if is_input else QFileDialog.AnyFile)
+        edit_control: QTextEdit = None
         if is_input:
             f = file_dialog.getOpenFileName()
+            edit_control = self.InFileEdit
         else:
             f = file_dialog.getSaveFileName()
-        return f[0]
+            edit_control = self.OutFileEdit
+        if f[0]:
+            edit_control.setText(f[0])
+        self.enable_controls()
     
     def disconnect(self):
         if self._adapter:
@@ -170,7 +161,7 @@ class CryptClientWindow(QMainWindow):
             self.AlgCombo.clear()
             self.AlgCombo.addItems(rsp.payload.decode().splitlines())
         except Exception as e:
-            self.log_error(str(e))
+            self.log_info(str(e), is_error=True)
             self.disconnect()
 
 
