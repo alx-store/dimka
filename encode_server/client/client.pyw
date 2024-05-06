@@ -16,7 +16,7 @@ sys.path.append(str(module_dir.parent))
 from common.protocol import *
 
 
-class ClienWorker(Thread):
+class ClientWorker(Thread):
     def __init__(self, adapter: ClientAdapter, command: str, alg_name: str) -> None:
         super().__init__()
         self.adapter: ClientAdapter = adapter
@@ -76,6 +76,8 @@ class CryptClientWindow(QMainWindow):
         files_selected = (self.InFileEdit.text() != "") and (self.OutFileEdit.text() != "") 
         self.EncryptBtn.setEnabled(not self.in_process and files_selected and (self._adapter != None))
         self.DecryptBtn.setEnabled(not self.in_process and files_selected and (self._adapter != None))
+
+        self.setWindowTitle("Демонстрация алгоритма шифрования")
     
     def log_info(self, text: str, is_error: bool = False) -> None:
         self.info_lock.acquire()
@@ -119,6 +121,9 @@ class CryptClientWindow(QMainWindow):
             return
         try:
             self._set_in_process(True)
+
+            self._adapter.get(SocketRequest("check_alg")).check_status()
+
             file_sise = input_file.stat().st_size
             part_count = self.PartCountEdit.value()
             part_size = math.ceil(file_sise / part_count)
@@ -127,7 +132,7 @@ class CryptClientWindow(QMainWindow):
             with input_file.open("rb") as f:
                 for i in range(part_count):
                     adapter = ClientAdapter(socket.create_connection((self.AddressEdit.text(), self.PortEdit.value())))
-                    worker = ClienWorker(adapter, command, alg_name)
+                    worker = ClientWorker(adapter, command, alg_name)
                     worker.name = str(i)
                     worker.data = f.read(part_size)
                     worker.logger = self.log_info
@@ -145,7 +150,7 @@ class CryptClientWindow(QMainWindow):
                     else:
                         QMessageBox.critical(self, "Ошибка", "Ошибка кодирования данных.\nСм. протокол работы приложения")
                         return
-                QMessageBox.information(self, "Кодирование данных", "Кодирование данных завершено успешно")
+            QMessageBox.information(self, "Кодирование данных", "Кодирование данных завершено успешно")
         finally:
             self._set_in_process(False)
 

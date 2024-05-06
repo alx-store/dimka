@@ -1,1 +1,1 @@
-pythonw client.pyw
+call pythonw client.pyw
