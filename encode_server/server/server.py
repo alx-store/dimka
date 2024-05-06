@@ -5,6 +5,7 @@ import logging
 import importlib
 from pathlib import Path
 from types import ModuleType
+from datetime import datetime
 
 module_dir = Path(__file__).parent
 sys.path.append(str(module_dir.parent))
@@ -13,8 +14,6 @@ from common.protocol import *
 
 # Здесь должны лежать алгоритмы
 alg_dir = module_dir / "alg"
-
-logger = logging.getLogger("encode-server")
 
 PORT = 10001
 MAX_CONNECTIONS = 1000
@@ -84,11 +83,8 @@ class Worker(threading.Thread):
             message (str): сообщение
             info (bool, optional): уровень отладки
         """
-        str_message = f"{self._address[0]}:{self._address[1]}: {message}"
-        if info: 
-            logger.info(str_message)
-        else: 
-            logger.debug(str_message)
+        str_message = f"{datetime.now().strftime('%d.%m.%Y %H:%M:%S')} - {self._address[0]}:{self._address[1]}: {message}"
+        print(str_message)
 
     def _load_module(self, alg_name: str) -> ModuleType:
         """Загрузка модуля обработки алгоритма
@@ -101,7 +97,7 @@ class Worker(threading.Thread):
         """
         # Загрузка модуля по указанному имени
         module_name = f"alg.{alg_name}"
-        self.info(f"Importing module {module_name}")
+        self.info(f"Загрузка модуля {module_name}")
         if module_name in sys.modules:
             module = sys.modules[module_name]
         else:
@@ -146,7 +142,7 @@ class Worker(threading.Thread):
         if (self.request.params == None) or ("alg_name" not in self.request.params):
             return SocketResponse(SERVER_BAD_REQUEST, "Не найден параметр alg_name с указанием алгоритма")
         if not self.request.payload:
-            return SocketResponse(SERVER_BAD_REQUEST, "В запросе отсутсвет информация для обработки")
+            return SocketResponse(SERVER_BAD_REQUEST, "В запросе отсутствует информация для обработки")
         try:
             module = self._load_module(self.request.params["alg_name"])
             if encode:
@@ -154,9 +150,9 @@ class Worker(threading.Thread):
             else:
                 func = module.decode
             # Обработка данных
-            self.info(f"Coding data")
+            self.info(f"Обработка данных")
             output = func(self.request.payload)
-            self.info(f"Encoded/decoded data length: {len(output)}")
+            self.info(f"Размер обработанных данных: {len(output)}")
             return SocketResponse(SERVER_OK, "", output)
         except Exception as e:
             return SocketResponse.error_response(str(e))
@@ -164,12 +160,12 @@ class Worker(threading.Thread):
     def run(self):
         """Основной обработчик потока
         """
-        self.info("Connected client")
+        self.info("Соединение с клиентом")
         try:
             # Слушаем до тех пор, пока есть запросы
             while True:
                 self.request = self._socket.get_request()
-                self.info(f"Command: {self.request.command}")
+                self.info(f"Команда: {self.request.command}")
                 # Формируем ответ в зависимости от команды
                 match self.request.command:
                     # Список алгоритмов
@@ -184,7 +180,7 @@ class Worker(threading.Thread):
                         self.info(response.payload.decode())
                     # Завершение соединения
                     case "close": 
-                        self.info("Disconnect")
+                        self.info("Завершение соединения")
                         break
                     # Кодирование данных
                     case "encode": 
@@ -198,7 +194,7 @@ class Worker(threading.Thread):
                 self._socket.send_response(response)
         except Exception as e:
             # Если что-то пошло не так, то отправляем сообщение ошибки. Напоследок
-            logger.error(str(e))
+            self.info(str(e), False)
         finally:
             # Закрыть сокет по завершении работы
             self._socket.close()
@@ -234,12 +230,6 @@ def setup(filename: str) -> None:
     # Максимальное количество соединений
     MAX_CONNECTIONS = _get_int("MAX_CONNECTIONS", MAX_CONNECTIONS)
     
-    # Настройка логгера
-    logger.setLevel(logging.DEBUG  if "DEBUG" in config else logging.INFO)
-    ch = logging.StreamHandler()
-    ch.setFormatter(logging.Formatter("%(levelname)s %(message)s"))
-    logger.addHandler(ch)            
-
 
 if __name__ == "__main__":
     # Загрузка настроек
@@ -249,6 +239,9 @@ if __name__ == "__main__":
         sock.bind(("", PORT))
         # Слушаем сокет
         sock.listen(MAX_CONNECTIONS)
+
+        print(f"Ожидание запросов на {PORT}\nМаксимальное число соединений: {MAX_CONNECTIONS}")
+
         while True:
             # Получили соединения
             conn, addr = sock.accept()
