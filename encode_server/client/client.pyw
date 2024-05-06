@@ -3,8 +3,7 @@ import sys
 import socket
 import math
 from pathlib import Path
-from threading import Thread
-from typing import Mapping
+from threading import Thread, Lock, current_thread
 
 from PyQt5.QtWidgets import QMessageBox
 from PyQt5.QtCore import *
@@ -18,9 +17,8 @@ from common.protocol import *
 
 
 class ClienWorker(Thread):
-    def __init__(self, id: int, adapter: ClientAdapter, command: str, alg_name: str) -> None:
+    def __init__(self, adapter: ClientAdapter, command: str, alg_name: str) -> None:
         super().__init__()
-        self.id = id
         self.adapter: ClientAdapter = adapter
         self.command: str = command
         self.alg_name: str = alg_name
@@ -30,12 +28,12 @@ class ClienWorker(Thread):
 
     def log(self, message: str, is_error: bool = False) -> None:
         if self.logger:
-            self.logger(f"Поток {self.id}: {message}", is_error)
+            self.logger(f"Поток {self.name}: {message}", is_error)
 
     def run(self) -> None:
         if self.adapter:
             try:
-                self.log(f"запрос на кодирование ({self.command}), алгортим: {self.alg_name}, размер данных {len(self.data)}")
+                self.log(f"запрос на кодирование ({self.command}), алгоритм: {self.alg_name}, размер данных {len(self.data)}")
                 self.response = self.adapter.get(SocketRequest(self.command, {"alg_name": self.alg_name}, self.data))
                 self.response.check_status()
                 self.log(f"сервер вернул данные, размер {len(self.response.payload)}")
@@ -57,22 +55,50 @@ class CryptClientWindow(QMainWindow):
         self.DecryptBtn.clicked.connect(self.decode)
         self.InFileBtn.clicked.connect(self.get_input_file)
         self.OutFileBtn.clicked.connect(self.get_output_file)
+        self.InFileEdit.editingFinished.connect(self.enable_controls)
+        self.OutFileEdit.editingFinished.connect(self.enable_controls)
 
+        self.info_lock: Lock = Lock()
+        self.in_process: bool = False
+
+        self.enable_controls()
+
+    def enable_controls(self) -> None:
+        self.AddressEdit.setEnabled(not self.in_process)
+        self.PortEdit.setEnabled(not self.in_process)
+        self.InFileEdit.setEnabled(not self.in_process)
+        self.OutFileEdit.setEnabled(not self.in_process)
+        self.AlgCombo.setEnabled(not self.in_process)
+        self.PartCountEdit.setEnabled(not self.in_process)
+
+        self.InFileBtn.setEnabled(not self.in_process)
+        self.OutFileBtn.setEnabled(not self.in_process)
+        self.ConnectBtn.setEnabled(not self.in_process)
+
+        files_selected = (self.InFileEdit.text() != "") and (self.OutFileEdit.text() != "") 
+        self.EncryptBtn.setEnabled(not self.in_process and files_selected and self._adapter)
+        self.DecryptBtn.setEnabled(not self.in_process and files_selected and self._adapter)
     
     def log_info(self, text: str, is_error: bool = False) -> None:
-        color = "#FF0000" if is_error else "#00FF00"
-        self.LogEdit.append(f'<font color="{color}">{text}</font>')
-        app.processEvents()
+        self.info_lock.acquire()
+        try:
+            color = "#FF0000" if is_error else "#00FF00"
+            self.LogEdit.append(f'<font color="{color}">{text}</font>')
+            app.processEvents()
+        finally:
+            self.info_lock.release()
 
     def get_input_file(self) -> None:
         file_name = self.select_file(True)
         if file_name:
             self.InFileEdit.setText(file_name)
+        self.enable_controls()
 
     def get_output_file(self) -> None:
         file_name = self.select_file(False)
         if file_name:
             self.OutFileEdit.setText(file_name)
+        self.enable_controls()
 
     def select_file(self, is_input: bool = True) -> None:
         file_dialog = QFileDialog(self) 
@@ -88,6 +114,7 @@ class CryptClientWindow(QMainWindow):
         if self._adapter:
            self.log_info("Закрытие соединения")
            self._adapter.close()
+        self.enable_controls()
     
     
     def encode(self) -> None:
@@ -96,39 +123,47 @@ class CryptClientWindow(QMainWindow):
     def decode(self) -> None:
         self.process_data("decode")
 
+    def _set_in_process(self, in_process: bool) -> None:
+        self.in_process = in_process
+        self.enable_controls()
+
     def process_data(self, command: str) -> None:
         input_file = Path(self.InFileEdit.text())
         alg_name = self.AlgCombo.currentText()
         if not input_file.is_file:
             QMessageBox.critical(f"Файл {input_file} не найден")
             return
-
-        file_sise = input_file.stat().st_size
-        part_count = self.PartCountEdit.value()
-        part_size = math.ceil(file_sise / part_count)
-        worker_list = []
-    
-        with input_file.open("rb") as f:
-            for i in range(part_count):
-                adapter = ClientAdapter(socket.create_connection((self.AddressEdit.text(), self.PortEdit.value())))
-                worker = ClienWorker(i, adapter, command, alg_name)
-                worker.data = f.read(part_size)
-                worker.logger = self.log_info
-                worker_list.append(worker)
-                worker.start()
-                self.log_info(f"Запущен поток {i}, передано {len(worker.data)} байт")
-        for worker in worker_list:
-            worker.join()
-
-        output_file = Path(self.OutFileEdit.text())
-        with output_file.open("wb") as f:
+        try:
+            self._set_in_process(True)
+            file_sise = input_file.stat().st_size
+            part_count = self.PartCountEdit.value()
+            part_size = math.ceil(file_sise / part_count)
+            worker_list = []
+        
+            with input_file.open("rb") as f:
+                for i in range(part_count):
+                    adapter = ClientAdapter(socket.create_connection((self.AddressEdit.text(), self.PortEdit.value())))
+                    worker = ClienWorker(adapter, command, alg_name)
+                    worker.name = str(i)
+                    worker.data = f.read(part_size)
+                    worker.logger = self.log_info
+                    worker_list.append(worker)
+                    worker.start()
+                    self.log_info(f"Запущен поток {worker.name}, передано {len(worker.data)} байт")
             for worker in worker_list:
-                if worker.response and worker.response.code == SERVER_OK:
-                    f.write(worker.response.payload)
-                else:
-                    QMessageBox.critical(self, "Ошибка", "Ошибка кодирования данных.\nСм. протокол работы приложения")
-                    return
-            QMessageBox.information(self, "Кодирование данных", "Кодирование данных завершено успешно")
+                worker.join()
+
+            output_file = Path(self.OutFileEdit.text())
+            with output_file.open("wb") as f:
+                for worker in worker_list:
+                    if worker.response and worker.response.code == SERVER_OK:
+                        f.write(worker.response.payload)
+                    else:
+                        QMessageBox.critical(self, "Ошибка", "Ошибка кодирования данных.\nСм. протокол работы приложения")
+                        return
+                QMessageBox.information(self, "Кодирование данных", "Кодирование данных завершено успешно")
+        finally:
+            self._set_in_process(False)
 
     def connect(self):
         self.disconnect()
