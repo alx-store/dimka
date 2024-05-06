@@ -76,18 +76,6 @@ class Worker(threading.Thread):
         """
         return SocketResponse(SERVER_UNKNOWN, f"Неизвестная команда {request.command}")
 
-    def  response_error(self, command: str, e: Exception) -> SocketResponse:
-        """Возвращает сообщение об ошибке обработки команды
-
-        Args:
-            command (str): команда
-            e (Exception): Сообщение об ошибке
-
-        Returns:
-            SocketResponse
-        """
-        return SocketResponse(SERVER_ERROR, f"Ошибка выполнения команды {command}\n{str(e)}")
-
     def info(self, message: str, info: bool = True) -> None:
         """ Вывод логгера
             Добавляет в вывод адрес клиента
@@ -116,13 +104,43 @@ class Worker(threading.Thread):
         if module_name in sys.modules:
             module = sys.modules[module_name]
         else:
-            module =  importlib.import_module(module_name)
+            try:
+                module =  importlib.import_module(module_name)
+            except Exception as e:
+                raise ImportError(f"Не удалось загрузить модуль {alg_name}: {str(e)}")    
         # Проверка существования методов кодирования и раскодирования
         if (not hasattr(module, "encode")) or (not hasattr(module, "decode")):
             raise ImportError(f"Модуль {alg_name} не содержит нужных функций")
         return module
 
+    def check_alg(self, request: SocketRequest) -> SocketResponse:           
+        """ Проверка загрузки алгоритма и наличия в нем нужных функций
+
+        Args:
+            request (SocketRequest): _description_
+
+        Returns:
+            SocketResponse: _description_
+        """
+        try:
+            alg_name = request.params["alg_name"]
+            _ = self._load_module(alg_name)
+        except IndexError:
+            return SocketResponse(SERVER_BAD_REQUEST, "Не найден параметр alg_name с указанием алгоритма")
+        except Exception as e:
+            return SocketResponse.error_response(f"Ошибка загрузки модуля {}:\n{str(e)}")
+        return SocketResponse()
+
     def process_data(self, request: SocketRequest, encode: bool = True) -> SocketResponse:
+        """Обработка команд кодирования и декодирования данных
+
+        Args:
+            request (SocketRequest): Запрос
+            encode (bool, optional): Признак - кодировать или декодировать. По умолчанию - кодировать
+
+        Returns:
+            SocketResponse: _description_
+        """
         # Проверка корретности запроса
         if (request.params == None) or ("alg_name" not in request.params):
             return SocketResponse(SERVER_BAD_REQUEST, "Не найден параметр alg_name с указанием алгоритма")
@@ -156,6 +174,9 @@ class Worker(threading.Thread):
                     # Список алгоритмов
                     case "list": 
                         response = self.getalglist()
+                    # Проверка загрузки алгоритма и наличия в нем нужных функций
+                    case "check": 
+                        response = self.check_alg(request)
                     # Эхо
                     case "echo":
                         response = self.echo(request)
