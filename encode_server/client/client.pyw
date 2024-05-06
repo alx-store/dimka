@@ -55,8 +55,8 @@ class CryptClientWindow(QMainWindow):
         self.DecryptBtn.clicked.connect(self.decode)
         self.InFileBtn.clicked.connect(self.get_input_file)
         self.OutFileBtn.clicked.connect(self.get_output_file)
-        self.InFileEdit.editingFinished.connect(self.enable_controls)
-        self.OutFileEdit.editingFinished.connect(self.enable_controls)
+        self.InFileEdit.editingFinished.connect(lambda : self.process_data("encode"))
+        self.OutFileEdit.editingFinished.connect(lambda : self.process_data("decode"))
 
         self.info_lock: Lock = Lock()
         self.in_process: bool = False
@@ -115,14 +115,7 @@ class CryptClientWindow(QMainWindow):
            self.log_info("Закрытие соединения")
            self._adapter.close()
         self.enable_controls()
-    
-    
-    def encode(self) -> None:
-        self.process_data("encode")
-
-    def decode(self) -> None:
-        self.process_data("decode")
-
+      
     def _set_in_process(self, in_process: bool) -> None:
         self.in_process = in_process
         self.enable_controls()
