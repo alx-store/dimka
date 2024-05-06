@@ -35,6 +35,7 @@ class Worker(threading.Thread):
         # Создаем адаптер для работы с сокетом и разбора запросов
         self._socket: SocketAdapter = SocketAdapter(socket)
         self._address: str = address
+        self.request: SocketRequest = None
 
     def getalglist(self) -> SocketResponse:
         """Обработчик запроса алгоритмов
@@ -50,7 +51,7 @@ class Worker(threading.Thread):
                                      if x.name != "__init__.py").encode()
         return response
    
-    def echo(self, request: SocketRequest) -> SocketResponse:
+    def echo(self) -> SocketResponse:
         """Обработчик команды echo
             Возвращает представление переданных данных 
         Args:
@@ -60,12 +61,12 @@ class Worker(threading.Thread):
             SocketResponse
         """
         response = SocketResponse()
-        response.payload = f"command={request.command}\nparams:\n\t" +\
-                             "\n\t".join(f"{k} = {v}" for k, v in request.params.items()) +\
-                             f"\npayload length: {len(request.payload)}".encode()
+        response.payload = f"command={self.request.command}\nparams:\n\t" +\
+                             "\n\t".join(f"{k} = {v}" for k, v in self.request.params.items()) +\
+                             f"\npayload length: {len(self.request.payload)}".encode()
         return response
 
-    def unknown(self, request: SocketRequest) -> SocketResponse:
+    def unknown(self) -> SocketResponse:
         """Обработчик неизвестной команды
 
         Args:
@@ -74,7 +75,7 @@ class Worker(threading.Thread):
         Returns:
             SocketResponse
         """
-        return SocketResponse(SERVER_UNKNOWN, f"Неизвестная команда {request.command}")
+        return SocketResponse(SERVER_UNKNOWN, f"Неизвестная команда {self.request.command}")
 
     def info(self, message: str, info: bool = True) -> None:
         """ Вывод логгера
@@ -113,7 +114,7 @@ class Worker(threading.Thread):
             raise ImportError(f"Модуль {alg_name} не содержит нужных функций")
         return module
 
-    def check_alg(self, request: SocketRequest) -> SocketResponse:           
+    def check_alg(self) -> SocketResponse:           
         """ Проверка загрузки алгоритма и наличия в нем нужных функций
 
         Args:
@@ -123,15 +124,15 @@ class Worker(threading.Thread):
             SocketResponse: _description_
         """
         try:
-            alg_name = request.params["alg_name"]
+            alg_name = self.request.params["alg_name"]
             _ = self._load_module(alg_name)
         except IndexError:
             return SocketResponse(SERVER_BAD_REQUEST, "Не найден параметр alg_name с указанием алгоритма")
         except Exception as e:
-            return SocketResponse.error_response(f"Ошибка загрузки модуля {}:\n{str(e)}")
+            return SocketResponse.error_response(f"Ошибка загрузки модуля {alg_name}:\n{str(e)}")
         return SocketResponse()
 
-    def process_data(self, request: SocketRequest, encode: bool = True) -> SocketResponse:
+    def process_data(self, encode: bool = True) -> SocketResponse:
         """Обработка команд кодирования и декодирования данных
 
         Args:
@@ -142,19 +143,19 @@ class Worker(threading.Thread):
             SocketResponse: _description_
         """
         # Проверка корретности запроса
-        if (request.params == None) or ("alg_name" not in request.params):
+        if (self.request.params == None) or ("alg_name" not in self.request.params):
             return SocketResponse(SERVER_BAD_REQUEST, "Не найден параметр alg_name с указанием алгоритма")
-        if not request.payload:
+        if not self.request.payload:
             return SocketResponse(SERVER_BAD_REQUEST, "В запросе отсутсвет информация для обработки")
         try:
-            module = self._load_module(request.params["alg_name"])
+            module = self._load_module(self.request.params["alg_name"])
             if encode:
                 func = module.encode
             else:
                 func = module.decode
             # Обработка данных
             self.info(f"Coding data")
-            output = func(request.payload)
+            output = func(self.request.payload)
             self.info(f"Encoded/decoded data length: {len(output)}")
             return SocketResponse(SERVER_OK, "", output)
         except Exception as e:
@@ -167,19 +168,19 @@ class Worker(threading.Thread):
         try:
             # Слушаем до тех пор, пока есть запросы
             while True:
-                request = self._socket.get_request()
-                self.info(f"Command: {request.command}")
+                self.request = self._socket.get_request()
+                self.info(f"Command: {self.request.command}")
                 # Формируем ответ в зависимости от команды
-                match request.command:
+                match self.request.command:
                     # Список алгоритмов
                     case "list": 
                         response = self.getalglist()
                     # Проверка загрузки алгоритма и наличия в нем нужных функций
                     case "check": 
-                        response = self.check_alg(request)
+                        response = self.check_alg()
                     # Эхо
                     case "echo":
-                        response = self.echo(request)
+                        response = self.echo()
                         self.info(response.payload.decode())
                     # Завершение соединения
                     case "close": 
@@ -187,13 +188,13 @@ class Worker(threading.Thread):
                         break
                     # Кодирование данных
                     case "encode": 
-                        response = self.process_data(request, True)
+                        response = self.process_data(encode=True)
                     # Декодирование данных
                     case "decode": 
-                        response = self.process_data(request, False)
+                        response = self.process_data(encode=False)
                     # Неизвестная команда
                     case _ :
-                        response = self.unknown(request)
+                        response = self.unknown()
                 self._socket.send_response(response)
         except Exception as e:
             # Если что-то пошло не так, то отправляем сообщение ошибки. Напоследок
