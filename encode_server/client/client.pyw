@@ -70,6 +70,9 @@ class CryptClientWindow(QMainWindow):
         self.DecryptBtn.clicked.connect(lambda : self.process_data("decode"))
         self.InFileBtn.clicked.connect(lambda : self.select_file(is_input=True))
         self.OutFileBtn.clicked.connect(lambda : self.select_file(is_input=False))
+        self.OutFileEdit.editingFinished.connect(self.enable_controls)
+        self.InFileEdit.editingFinished.connect(self.enable_controls)
+        self.AlgCombo.currentIndexChanged.connect(self.enable_controls)
 
         self.info_lock: Lock = Lock()
         self.in_process: bool = False
@@ -90,9 +93,9 @@ class CryptClientWindow(QMainWindow):
         self.OutFileBtn.setEnabled(not self.in_process)
         self.ConnectBtn.setEnabled(not self.in_process)
 
-        files_selected = (self.InFileEdit.text() != "") and (self.OutFileEdit.text() != "") 
-        self.EncryptBtn.setEnabled(not self.in_process and files_selected and (self._adapter != None))
-        self.DecryptBtn.setEnabled(not self.in_process and files_selected and (self._adapter != None))
+        files_selected = (self.InFileEdit.text() != "") and (self.OutFileEdit.text() != "") and (self.AlgCombo.currentText() != "")
+        self.EncryptBtn.setEnabled((not self.in_process) and files_selected and (self._adapter != None))
+        self.DecryptBtn.setEnabled((not self.in_process) and files_selected and (self._adapter != None))
    
     def log_info(self, text: str, is_error: bool = False) -> None:
         """Вывод в лог
@@ -162,11 +165,12 @@ class CryptClientWindow(QMainWindow):
             # Помечаем, что процесс начат - контролы не доступны
             self._set_in_process(True)
             # Проверить алгоритм на корректность
-            self._adapter.get(SocketRequest("check_alg")).check_status()
+            self._adapter.get(SocketRequest("check", {"alg_name": alg_name})).check_status()
 
             # Размер файла, количество частей и размер части
             file_sise = input_file.stat().st_size
             part_count = self.PartCountEdit.value()
+            # Берем ближайшее большее целое!!!
             part_size = math.ceil(file_sise / part_count)
 
             # Здесь будет список потоков, обрабатывающих данные
@@ -202,6 +206,8 @@ class CryptClientWindow(QMainWindow):
                         QMessageBox.critical(self, "Ошибка", "Ошибка кодирования данных.\nСм. протокол работы приложения")
                         return
             QMessageBox.information(self, "Кодирование данных", "Кодирование данных завершено успешно")
+        except Exception as e:
+            self.log_info(f"Ошибка в процессе обработки данных\n{str(e)}", is_error=True)
         finally:
             # Снимаем отметку того, что процесс запущен - контролы доступны
             self._set_in_process(False)
