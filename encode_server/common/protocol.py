@@ -48,8 +48,10 @@ class SocketRequest:
         parts = data.split(SEPARATOR, maxsplit=2)
         request = SocketRequest()
         request.command = parts[0].decode().lower()
-        request.get_params(parts[1].decode())
-        request.payload = parts[2]
+        if len(parts) > 1:
+            request.get_params(parts[1].decode())
+        if len(parts) > 2:
+            request.payload = parts[2]
         return request
 
 
