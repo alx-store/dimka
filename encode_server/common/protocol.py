@@ -239,4 +239,11 @@ class ClientAdapter(SocketAdapter):
         except Exception as e:
             # Если произошла ошибка отправить сообщение об ошибке
             return SocketResponse.error_response(str(e))
+
+    def close(self) -> None:
+        """Закрывает сокет
+        """
+        self.send_request(SocketRequest("close"))
+        super().close()
+
     
