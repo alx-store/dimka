@@ -19,10 +19,10 @@ from common.protocol import *
 class ClientWorker(Thread):
     """Клиентский поток, отправляющий часть данных на сервер и получающий кодированный ответ
     """
-    def __init__(self, adapter: ClientAdapter, command: str, alg_name: str) -> None:
+    def __init__(self, adapter: SocketAdapter, command: str, alg_name: str) -> None:
         super().__init__()
         # Адаптер с соединением к сокету (создается клиентским приложением)
-        self.adapter: ClientAdapter = adapter
+        self.adapter: SocketAdapter = adapter
         self.command: str = command
         self.alg_name: str = alg_name
         self.data: bytes = None
@@ -52,6 +52,8 @@ class ClientWorker(Thread):
                 self.log(f"сервер вернул данные, размер {len(self.response.payload)}")
             except Exception as e:
                 self.log(f"ошибка на сервере {str(e)}", is_error=True)
+            finally:
+                self.adapter.close()
         else:
             self.log("подключение к серверу не установлено", is_error=True)
 
@@ -61,7 +63,7 @@ class CryptClientWindow(QMainWindow):
     def __init__(self, parent: QMainWindow = None) -> None:
         super().__init__(parent)
 
-        self._adapter: ClientAdapter = None
+        self._adapter: SocketAdapter = None
         
         uic.loadUi(module_dir / "ui/client.ui", self)
         self.setWindowTitle("Демонстрация алгоритма шифрования")
@@ -70,6 +72,9 @@ class CryptClientWindow(QMainWindow):
         self.DecryptBtn.clicked.connect(lambda : self.process_data("decode"))
         self.InFileBtn.clicked.connect(lambda : self.select_file(is_input=True))
         self.OutFileBtn.clicked.connect(lambda : self.select_file(is_input=False))
+        self.OutFileEdit.editingFinished.connect(self.enable_controls)
+        self.InFileEdit.editingFinished.connect(self.enable_controls)
+        self.AlgCombo.currentIndexChanged.connect(self.enable_controls)
 
         self.info_lock: Lock = Lock()
         self.in_process: bool = False
@@ -90,9 +95,9 @@ class CryptClientWindow(QMainWindow):
         self.OutFileBtn.setEnabled(not self.in_process)
         self.ConnectBtn.setEnabled(not self.in_process)
 
-        files_selected = (self.InFileEdit.text() != "") and (self.OutFileEdit.text() != "") 
-        self.EncryptBtn.setEnabled(not self.in_process and files_selected and (self._adapter != None))
-        self.DecryptBtn.setEnabled(not self.in_process and files_selected and (self._adapter != None))
+        files_selected = (self.InFileEdit.text() != "") and (self.OutFileEdit.text() != "") and (self.AlgCombo.currentText() != "")
+        self.EncryptBtn.setEnabled((not self.in_process) and files_selected and (self._adapter != None))
+        self.DecryptBtn.setEnabled((not self.in_process) and files_selected and (self._adapter != None))
    
     def log_info(self, text: str, is_error: bool = False) -> None:
         """Вывод в лог
@@ -162,11 +167,12 @@ class CryptClientWindow(QMainWindow):
             # Помечаем, что процесс начат - контролы не доступны
             self._set_in_process(True)
             # Проверить алгоритм на корректность
-            self._adapter.get(SocketRequest("check_alg")).check_status()
+            self._adapter.get(SocketRequest("check", {"alg_name": alg_name})).check_status()
 
             # Размер файла, количество частей и размер части
             file_sise = input_file.stat().st_size
             part_count = self.PartCountEdit.value()
+            # Берем ближайшее большее целое!!!
             part_size = math.ceil(file_sise / part_count)
 
             # Здесь будет список потоков, обрабатывающих данные
@@ -176,7 +182,7 @@ class CryptClientWindow(QMainWindow):
                 # Считываем файл порциями - по количеству потоков
                 for i in range(part_count):
                     # Для каждой порции - свой поток. Для потока - адаптер и сокет
-                    adapter = ClientAdapter(socket.create_connection((self.AddressEdit.text(), self.PortEdit.value())))
+                    adapter = SocketAdapter(socket.create_connection((self.AddressEdit.text(), self.PortEdit.value())))
                     worker = ClientWorker(adapter, command, alg_name)
                     worker.name = str(i)
                     # передача данных в поток
@@ -202,6 +208,8 @@ class CryptClientWindow(QMainWindow):
                         QMessageBox.critical(self, "Ошибка", "Ошибка кодирования данных.\nСм. протокол работы приложения")
                         return
             QMessageBox.information(self, "Кодирование данных", "Кодирование данных завершено успешно")
+        except Exception as e:
+            self.log_info(f"Ошибка в процессе обработки данных\n{str(e)}", is_error=True)
         finally:
             # Снимаем отметку того, что процесс запущен - контролы доступны
             self._set_in_process(False)
@@ -214,7 +222,7 @@ class CryptClientWindow(QMainWindow):
         self.log_info(f"Соединение с {self.AddressEdit.text()}:{self.PortEdit.value()}...")
         try:
             # Создаем новые сокет и адаптер
-            self._adapter = ClientAdapter(socket.create_connection((self.AddressEdit.text(), self.PortEdit.value())))
+            self._adapter = SocketAdapter(socket.create_connection((self.AddressEdit.text(), self.PortEdit.value())))
             self.log_info("Соединение установлено")
             self.log_info("Запрос списка алгоритмов")
             # Запрос списка алгоритмов
@@ -226,6 +234,10 @@ class CryptClientWindow(QMainWindow):
             self.log_info(str(e), is_error=True)
             # Отсоединяемся в случае ошибки
             self.disconnect()
+    
+    def close(self):
+        self.disconnect()
+        super().close()
 
 
 if __name__ == "__main__":

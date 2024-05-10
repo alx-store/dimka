@@ -48,8 +48,10 @@ class SocketRequest:
         parts = data.split(SEPARATOR, maxsplit=2)
         request = SocketRequest()
         request.command = parts[0].decode().lower()
-        request.get_params(parts[1].decode())
-        request.payload = parts[2]
+        if len(parts) > 1:
+            request.get_params(parts[1].decode())
+        if len(parts) > 2:
+            request.payload = parts[2]
         return request
 
 
@@ -143,58 +145,28 @@ class SocketAdapter:
             SocketResponse
         """
         return SocketResponse.from_data(self._get_from_socket())
-
-    def send_request_header(self, command: str, params: dict = None) -> None:
-        """ Отправка запроса в сокет - без данных для обработки
-
-        Args:
-            command (str): _description_
-            params (dict, optional): _description_. Defaults to None.
-        """
-        # Отправка команды
-        self._socket.send(command.encode())
-        # Разделитель
-        self._socket.send(SEPARATOR)
-        # Если есть параметры, то формируем строку и отправляем
-        if params and len(params) > 0:
-            str_params = ";".join(f"{k}={v}" for k, v in params.items())
-            self._socket.send(str_params.encode())
-        # Разделитель
-        self._socket.send(SEPARATOR)
-
-    def send_data(self, data: bytes) -> None:
-        """Отправка данных в сокет
-        Args:
-            data (bytes): данные для отправки
-        """
-        self._socket.sendall(data)
-        # Признак конца сообщения вызывающая сторона должна отправлять самостоятельно - на случай, если нужно отправлять файл по частям
-        
+       
     def send_request(self, request: SocketRequest) -> None:
         """Отправка запроса в сокет
 
         Args:
             request (SocketRequest): Запрос
         """
-        # Отправка заголовка
-        self.send_request_header(request.command, request.params)
+        # Отправка команды
+        self._socket.send(request.command.encode())
+        # Разделитель
+        self._socket.send(SEPARATOR)
+        # Если есть параметры, то формируем строку и отправляем
+        if (request.params != None) and len(request.params) > 0:
+            str_params = ";".join(f"{k}={v}" for k, v in request.params.items())
+            self._socket.send(str_params.encode())
+        # Разделитель
+        self._socket.send(SEPARATOR)
         # Если есть данные для обработки, то отправляем
         if request.payload:
             self._socket.sendall(request.payload)
         # Конец сообщения
         self.end_message()
-
-    def send_response_header(self, code: int, message: str = None) -> None:
-        """Отправка заголовка ответа в сокет
-        Args:
-            code (int): код ответа
-            message (str, optional): сообщение (опционально)
-        """
-        self._socket.send(str(code).encode())
-        self._socket.send(SEPARATOR)
-        if message:
-            self._socket.send(message.encode())
-        self._socket.send(SEPARATOR)
 
     def send_response(self, response: SocketResponse) -> None:
         """Отправка ответа в сокет
@@ -202,7 +174,12 @@ class SocketAdapter:
         Args:
             response (SocketResponse): Ответ сервера
         """
-        self.send_response_header(response.code, response.message)
+        self._socket.send(str(response.code).encode())
+        self._socket.send(SEPARATOR)
+        if response.message != None:
+            self._socket.send(response.message.encode())
+        self._socket.send(SEPARATOR)
+
         # Если есть обработанные данные, то отправляем
         if response.payload:
             self._socket.sendall(response.payload)
@@ -214,17 +191,6 @@ class SocketAdapter:
         """
         self._socket.send(END_MESSAGE_TEXT)
 
-    def close(self) -> None:
-        """Закрывает сокет
-        """
-        self._socket.close()
-
-class ClientAdapter(SocketAdapter):
-    """Адаптер для клиента
-       Наследует от  SocketAdapter, упрощает получение ответа на запрос
-    Args:
-        SocketAdapter (_type_): _description_
-    """
     def get(self, request: SocketRequest) -> SocketResponse:
         """Отправить запрос и получить ответ
         Args:
@@ -239,4 +205,8 @@ class ClientAdapter(SocketAdapter):
         except Exception as e:
             # Если произошла ошибка отправить сообщение об ошибке
             return SocketResponse.error_response(str(e))
-    
+
+    def close(self) -> None:
+        """Закрывает сокет
+        """
+        self._socket.close()

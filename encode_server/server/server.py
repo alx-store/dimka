@@ -1,8 +1,8 @@
 import sys
 import socket
-import threading
-import logging
 import importlib
+from multiprocessing import Process, get_context
+from multiprocessing.queues import Queue
 from pathlib import Path
 from types import ModuleType
 from datetime import datetime
@@ -18,12 +18,24 @@ alg_dir = module_dir / "alg"
 PORT = 10001
 MAX_CONNECTIONS = 1000
 
-class Worker(threading.Thread):
+
+class StdoutQueue(Queue):
+    def __init__(self, *args, **kwargs):
+        ctx = get_context()
+        Queue.__init__(self, *args, **kwargs, ctx=ctx)
+
+    def write(self,msg):
+        self.put(msg)
+
+    def flush(self):
+        sys.__stdout__.flush()
+
+class Worker(Process):
     """Поток обработки клиентского соединия
     Args:
         threading (_type_): _description_
     """
-    def __init__(self, socket: socket.socket, address: str):
+    def __init__(self, socket: socket.socket, address: str, q: StdoutQueue):
         """Инициализация потока
 
         Args:
@@ -31,10 +43,21 @@ class Worker(threading.Thread):
             address (str): адрес клиента
         """
         super().__init__()
+        self.stdout = q
         # Создаем адаптер для работы с сокетом и разбора запросов
         self._socket: SocketAdapter = SocketAdapter(socket)
         self._address: str = address
         self.request: SocketRequest = None
+
+    def info(self, message: str, info: bool = True) -> None:
+        """ Вывод логгера
+            Добавляет в вывод адрес клиента
+        Args:
+            message (str): сообщение
+            info (bool, optional): уровень отладки
+        """
+        str_message = f"{datetime.now().strftime('%d.%m.%Y %H:%M:%S')} - {self._address[0]}:{self._address[1]}: {message}"
+        print(str_message)
 
     def getalglist(self) -> SocketResponse:
         """Обработчик запроса алгоритмов
@@ -45,9 +68,10 @@ class Worker(threading.Thread):
         Returns:
             SocketResponse
         """
+        alg_list = "\n".join(x.stem for x in alg_dir.rglob("*.py") if x.name != "__init__.py")
+        self.info(f"Список алгоритмов: {alg_list.replace('\n', ', ')}")
         response = SocketResponse()
-        response.payload = "\n".join(x.stem for x in alg_dir.rglob("*.py") 
-                                     if x.name != "__init__.py").encode()
+        response.payload = alg_list.encode()
         return response
    
     def echo(self) -> SocketResponse:
@@ -59,6 +83,7 @@ class Worker(threading.Thread):
         Returns:
             SocketResponse
         """
+        self.info(f"ECHO - возврат команды")
         response = SocketResponse()
         response.payload = f"command={self.request.command}\nparams:\n\t" +\
                              "\n\t".join(f"{k} = {v}" for k, v in self.request.params.items()) +\
@@ -74,17 +99,8 @@ class Worker(threading.Thread):
         Returns:
             SocketResponse
         """
+        self.info(f"Неизвестная команда {self.request.command}")
         return SocketResponse(SERVER_UNKNOWN, f"Неизвестная команда {self.request.command}")
-
-    def info(self, message: str, info: bool = True) -> None:
-        """ Вывод логгера
-            Добавляет в вывод адрес клиента
-        Args:
-            message (str): сообщение
-            info (bool, optional): уровень отладки
-        """
-        str_message = f"{datetime.now().strftime('%d.%m.%Y %H:%M:%S')} - {self._address[0]}:{self._address[1]}: {message}"
-        print(str_message)
 
     def _load_module(self, alg_name: str) -> ModuleType:
         """Загрузка модуля обработки алгоритма
@@ -104,7 +120,7 @@ class Worker(threading.Thread):
             try:
                 module =  importlib.import_module(module_name)
             except Exception as e:
-                raise ImportError(f"Не удалось загрузить модуль {alg_name}: {str(e)}")    
+                raise ImportError(f"Не удалось загрузить модуль {alg_name}:\n{str(e)}")    
         # Проверка существования методов кодирования и раскодирования
         if (not hasattr(module, "encode")) or (not hasattr(module, "decode")):
             raise ImportError(f"Модуль {alg_name} не содержит нужных функций")
@@ -119,11 +135,13 @@ class Worker(threading.Thread):
         Returns:
             SocketResponse: _description_
         """
+         # Проверка корретности запроса
+        if (self.request.params == None) or ("alg_name" not in self.request.params):
+            return SocketResponse(SERVER_BAD_REQUEST, "Не найден параметр alg_name с указанием алгоритма")
         try:
             alg_name = self.request.params["alg_name"]
+            self.info(f"Проверка корректности модуля: {alg_name}")
             _ = self._load_module(alg_name)
-        except IndexError:
-            return SocketResponse(SERVER_BAD_REQUEST, "Не найден параметр alg_name с указанием алгоритма")
         except Exception as e:
             return SocketResponse.error_response(f"Ошибка загрузки модуля {alg_name}:\n{str(e)}")
         return SocketResponse()
@@ -181,6 +199,7 @@ class Worker(threading.Thread):
                     # Завершение соединения
                     case "close": 
                         self.info("Завершение соединения")
+                        self._socket.close()
                         break
                     # Кодирование данных
                     case "encode": 
@@ -234,6 +253,8 @@ def setup(filename: str) -> None:
 if __name__ == "__main__":
     # Загрузка настроек
     setup("config.cfg")
+    stdout_queue = StdoutQueue()
+    # sys.stdout = stdout_queue 
     with socket.socket() as sock:
         # Соединяемся с сокетом
         sock.bind(("", PORT))
@@ -246,5 +267,5 @@ if __name__ == "__main__":
             # Получили соединения
             conn, addr = sock.accept()
             # Запустили поток обработки
-            th = Worker(conn, addr)
+            th = Worker(conn, addr, stdout_queue)
             th.start()
