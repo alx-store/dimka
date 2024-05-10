@@ -232,6 +232,10 @@ class CryptClientWindow(QMainWindow):
             self.log_info(str(e), is_error=True)
             # Отсоединяемся в случае ошибки
             self.disconnect()
+    
+    def close(self):
+        self.disconnect()
+        super().close()
 
 
 if __name__ == "__main__":
