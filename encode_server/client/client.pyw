@@ -19,10 +19,10 @@ from common.protocol import *
 class ClientWorker(Thread):
     """Клиентский поток, отправляющий часть данных на сервер и получающий кодированный ответ
     """
-    def __init__(self, adapter: ClientAdapter, command: str, alg_name: str) -> None:
+    def __init__(self, adapter: SocketAdapter, command: str, alg_name: str) -> None:
         super().__init__()
         # Адаптер с соединением к сокету (создается клиентским приложением)
-        self.adapter: ClientAdapter = adapter
+        self.adapter: SocketAdapter = adapter
         self.command: str = command
         self.alg_name: str = alg_name
         self.data: bytes = None
@@ -61,7 +61,7 @@ class CryptClientWindow(QMainWindow):
     def __init__(self, parent: QMainWindow = None) -> None:
         super().__init__(parent)
 
-        self._adapter: ClientAdapter = None
+        self._adapter: SocketAdapter = None
         
         uic.loadUi(module_dir / "ui/client.ui", self)
         self.setWindowTitle("Демонстрация алгоритма шифрования")
@@ -180,7 +180,7 @@ class CryptClientWindow(QMainWindow):
                 # Считываем файл порциями - по количеству потоков
                 for i in range(part_count):
                     # Для каждой порции - свой поток. Для потока - адаптер и сокет
-                    adapter = ClientAdapter(socket.create_connection((self.AddressEdit.text(), self.PortEdit.value())))
+                    adapter = SocketAdapter(socket.create_connection((self.AddressEdit.text(), self.PortEdit.value())))
                     worker = ClientWorker(adapter, command, alg_name)
                     worker.name = str(i)
                     # передача данных в поток
@@ -220,7 +220,7 @@ class CryptClientWindow(QMainWindow):
         self.log_info(f"Соединение с {self.AddressEdit.text()}:{self.PortEdit.value()}...")
         try:
             # Создаем новые сокет и адаптер
-            self._adapter = ClientAdapter(socket.create_connection((self.AddressEdit.text(), self.PortEdit.value())))
+            self._adapter = SocketAdapter(socket.create_connection((self.AddressEdit.text(), self.PortEdit.value())))
             self.log_info("Соединение установлено")
             self.log_info("Запрос списка алгоритмов")
             # Запрос списка алгоритмов
