@@ -52,6 +52,8 @@ class ClientWorker(Thread):
                 self.log(f"сервер вернул данные, размер {len(self.response.payload)}")
             except Exception as e:
                 self.log(f"ошибка на сервере {str(e)}", is_error=True)
+            finally:
+                self.adapter.close()
         else:
             self.log("подключение к серверу не установлено", is_error=True)
 
