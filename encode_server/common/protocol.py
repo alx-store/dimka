@@ -112,7 +112,7 @@ class SocketAdapter:
         Реализует отправку и получение запросов и ответов
     """
     def __init__(self, sock: socket.socket) -> None:
-        self._socket: socket.socket = sock
+        self._socket = sock
     
     def _get_from_socket(self) -> bytes:
         """Получение данных из сокета
@@ -157,7 +157,7 @@ class SocketAdapter:
         # Разделитель
         self._socket.send(SEPARATOR)
         # Если есть параметры, то формируем строку и отправляем
-        if (request.params != None) and len(request.params) > 0:
+        if len(request.params) > 0:
             str_params = ";".join(f"{k}={v}" for k, v in request.params.items())
             self._socket.send(str_params.encode())
         # Разделитель
@@ -166,7 +166,7 @@ class SocketAdapter:
         if request.payload:
             self._socket.sendall(request.payload)
         # Конец сообщения
-        self.end_message()
+        self._socket.send(END_MESSAGE_TEXT)
 
     def send_response(self, response: SocketResponse) -> None:
         """Отправка ответа в сокет
@@ -184,12 +184,7 @@ class SocketAdapter:
         if response.payload:
             self._socket.sendall(response.payload)
         # Конец сообщения
-        self.end_message()
-    
-    def end_message(self):
-        """Отправка маркера конца сообщения
-        """
-        self._socket.send(END_MESSAGE_TEXT)
+        self._socket.send(END_MESSAGE_TEXT)      
 
     def get(self, request: SocketRequest) -> SocketResponse:
         """Отправить запрос и получить ответ
